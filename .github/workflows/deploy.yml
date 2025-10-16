@@ -1,0 +1,83 @@
+name: Deploy Angular App to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Cancel previous runs if a new push occurs
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Extract project name from angular.json
+        id: project-info
+        run: |
+          # Extract the first project key from angular.json
+          PROJECT_NAME=$(node -e "
+            const fs = require('fs');
+            const angular = JSON.parse(fs.readFileSync('angular.json', 'utf8'));
+            const projectName = angular.defaultProject || Object.keys(angular.projects)[0];
+            console.log(projectName);
+          ")
+          echo "project-name=$PROJECT_NAME" >> $GITHUB_OUTPUT
+          
+          # Extract output path from angular.json
+          OUTPUT_PATH=$(node -e "
+            const fs = require('fs');
+            const angular = JSON.parse(fs.readFileSync('angular.json', 'utf8'));
+            const projectName = angular.defaultProject || Object.keys(angular.projects)[0];
+            const outputPath = angular.projects[projectName].architect.build.options.outputPath;
+            console.log(outputPath);
+          ")
+          echo "output-path=$OUTPUT_PATH" >> $GITHUB_OUTPUT
+
+      - name: Build Angular application
+        run: |
+          npm run build -- --base-href "/${{ github.event.repository.name }}/"
+
+      - name: Copy index.html to 404.html for SPA routing
+        run: |
+          cp ${{ steps.project-info.outputs.output-path }}/index.html ${{ steps.project-info.outputs.output-path }}/404.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.project-info.outputs.output-path }}
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Output deployment URL
+        run: |
+          echo "🚀 Deployment successful!"
+          echo "📱 Your Angular app is now live at: ${{ steps.deployment.outputs.page_url }}"
